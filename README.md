@@ -34,9 +34,10 @@ but that mapping seems never to work right as NT and the -nix world can't agree
 on ordering ACLS (amongst other things).
 
 Since Samba thought about storing the NT ACLS as a security.NTACLS xattr, I tried my
-luck with that approach. And am having limited success. At this point (Nov 2022)
-local copies from NT to NT work, remote copies from NT to NT via ssh work after excluding
-rsync's (POSIX) 'chmod', which altered the NT ACLS.
+luck with that approach. At this point (Dec 2022) local copies from NT to NT work, 
+remote copies from NT to NT via ssh work also ~~(after excluding rsync's (POSIX) 'chmod',
+which altered the NT ACLS)~~. NT to MAC has also been tested with `xattr filename` displaying
+the NTACLS as hexdump. Testing restore from MAC pending..
 
 This is based on the ntstreams.c implementation of BackupAssist's rsync,
 published as patches to a 2009 version of Rsync a while back under the GPL.
