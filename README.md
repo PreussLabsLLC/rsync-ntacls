@@ -86,11 +86,30 @@ if things look OK, apply with \
 `./configure`\
 `make`\
 `./rsync -V`
+(Sorry for the compiler warnings, try to ignore them for now.)
+You should be greeted by something like this: 
+```
+$ ./rsync -V
+rsync  version 3.2.6pl (compiled Dec  4 2022 17:00:02) protocol version 31
+Copyright (C) 1996-2022 by Andrew Tridgell, Wayne Davison, and others.
+Web site: https://rsync.samba.org/
+Capabilities:
+    64-bit files, 64-bit inums, 64-bit timestamps, 64-bit long ints,
+    socketpairs, symlinks, symtimes, hardlinks, no hardlink-specials,
+    hardlink-symlinks, IPv6, atimes, batchfiles, inplace, append, ACLs,
+    xattrs, optional secluded-args, no iconv, prealloc, stop-at, crtimes
+Optimizations:
+    no SIMD-roll, no asm-roll, openssl-crypto, no asm-MD5
+Checksum list:
+    xxh128 xxh3 xxh64 (xxhash) md5 md4 none
+Compress list:
+    zstd lz4 zlibx zlib none
 
-(Sorry for the warnings, try to ignore them for now.)
-
+rsync comes with ABSOLUTELY NO WARRANTY.  This is free software, and you
+are welcome to redistribute it under certain conditions.  See the GNU
+General Public Licence for details.
+```
 - You may want to rename existing versions to preserve them as fall-back
-
 - Copy the just built rsync version to your sender and receiver Windows systems as\
 `/usr/local/bin/rsync` \
 with a symlink to \
