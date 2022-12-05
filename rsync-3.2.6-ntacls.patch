@@ -1,0 +1,562 @@
+
+--- rsync-3.2.6/Makefile.in	2022-03-03 17:00:57.000000000 -0800
++++ rsync-3.2.6-pl/Makefile.in	2022-12-04 15:32:14.556757100 -0800
+@@ -46,7 +46,7 @@
+ OBJS1=flist.o rsync.o generator.o receiver.o cleanup.o sender.o exclude.o \
+ 	util1.o util2.o main.o checksum.o match.o syscall.o log.o backup.o delete.o
+ OBJS2=options.o io.o compat.o hlink.o token.o uidlist.o socket.o hashtable.o \
+-	usage.o fileio.o batch.o clientname.o chmod.o acls.o xattrs.o
++	usage.o fileio.o batch.o clientname.o chmod.o acls.o xattrs.o ntacls.o 
+ OBJS3=progress.o pipe.o @MD5_ASM@ @ROLL_SIMD@ @ROLL_ASM@
+ DAEMON_OBJ = params.o loadparm.o clientserver.o access.o connection.o authenticate.o
+ popt_OBJS=popt/findme.o  popt/popt.o  popt/poptconfig.o \
+--- rsync-3.2.6/ntacls.c	2022-12-04 21:23:41.624929900 -0800
++++ rsync-3.2.6-pl/ntacls.c	2022-12-04 21:16:41.651091700 -0800
+@@ -0,0 +1,428 @@
++/*
++ * NTFS backup/restore routines
++ *
++ * Copyright (C) 2010 Cortex IT
++ *
++ * This program is free software; you can redistribute it and/or modify
++ * it under the terms of the GNU General Public License as published by
++ * the Free Software Foundation; either version 3 of the License, or
++ * (at your option) any later version.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ *
++ * You should have received a copy of the GNU General Public License along
++ * with this program; if not, visit the http://fsf.org website.
++ */
++
++/*
++ * heavily refactored and simplified for later rsync versions:
++ * - removed obfuscation and filtering
++ * - added transferral of the nt acls as security.ntacl xattr 
++ *   	(hoping for samba vfs_xattr compatibilty on *nix systems at some point)
++ *
++ *   Copyright (C) 2022 PreussLabs LLC
++ *
++ *   pl 20221204
++ */
++
++#include "rsync.h"
++#include <windows.h>
++#include <sys/cygwin.h>
++
++#define BUFFER_SIZE (64*1024)
++#define ERROR_BUFFER_SIZE 1024
++
++extern int verbose;
++
++static char ntstreams_last_error[ERROR_BUFFER_SIZE];
++static char *ntstreams_last_error_what = "";
++static int privileged_for_backup = 0;
++static int privileged_for_restore = 0;
++
++//#define NEEDS_ACLS
++#ifdef NEEDS_ACLS
++struct acls_struct {
++        const char *dirname;    /* The dir info inside the transfer */
++        const char *nt_acls;    // ntfs acls
++        int nt_acls_len;        // ntfs acls length
++};
++#endif
++
++char *ntstreams_get_last_error_message()
++{
++	return ntstreams_last_error;
++}
++
++const char *ntstreams_get_last_error_what()
++{
++	return ntstreams_last_error_what;
++}
++
++int set_privilege(const char *lpszPrivilege, int bEnablePrivilege)
++{
++	HANDLE hToken;
++	TOKEN_PRIVILEGES tp;
++	LUID luid;
++
++	if (!OpenProcessToken(GetCurrentProcess(), TOKEN_ADJUST_PRIVILEGES, &hToken))
++		goto handle_error;
++
++	if (!LookupPrivilegeValue(NULL, lpszPrivilege, &luid))
++		goto handle_error;
++
++	tp.PrivilegeCount = 1;
++	tp.Privileges[0].Luid = luid;
++	if (bEnablePrivilege)
++		tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
++	else
++		tp.Privileges[0].Attributes = 0;
++
++	if (!AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(TOKEN_PRIVILEGES), 
++				(PTOKEN_PRIVILEGES) NULL, (PDWORD) NULL))
++		goto handle_error;
++
++	if (GetLastError() == ERROR_NOT_ALL_ASSIGNED)
++		goto handle_error;
++	return TRUE;
++
++handle_error:
++	FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
++		NULL, GetLastError(), MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
++		ntstreams_last_error, ERROR_BUFFER_SIZE, NULL);
++	return FALSE;
++}
++
++int set_privilege_backup(int bEnablePrivilege)
++{
++	return set_privilege(SE_BACKUP_NAME, bEnablePrivilege);
++}
++
++int set_privilege_restore(int bEnablePrivilege)
++{
++	return set_privilege(SE_RESTORE_NAME, bEnablePrivilege);
++}
++
++int set_privilege_security(int bEnablePrivilege)
++{
++	return set_privilege(SE_SECURITY_NAME, bEnablePrivilege);
++}
++
++int set_privilege_take_ownership(int bEnablePrivilege)
++{
++	return set_privilege(SE_TAKE_OWNERSHIP_NAME, bEnablePrivilege);
++}
++
++void set_backup_privilege()
++{
++        if ( privileged_for_backup) {
++		return;
++	}
++	if (verbose ) rprintf(FINFO, "requesting SeBackupPrivilege\n");
++	if (!set_privilege_backup(1))
++		rprintf(FERROR, "could not obtain SeBackupPrivilege: %s\n",
++			ntstreams_get_last_error_message());
++	if (verbose >3) rprintf(FINFO, "requesting SeSecurityPrivilege\n");
++	if (!set_privilege_security(1))
++		rprintf(FERROR, "could not obtain SeSecurityPrivilege: %s\n",
++			ntstreams_get_last_error_message());
++	privileged_for_backup= 1;
++}
++
++void set_restore_privilege()
++{
++	if ( privileged_for_restore) {
++		return;
++	}
++	if (verbose ) rprintf(FINFO, "requesting SeRestorePrivilege\n");
++	if (!set_privilege_restore(1))
++		rprintf(FERROR, "could not obtain SeRestorePrivilege: %s\n",
++			ntstreams_get_last_error_message());
++	if (verbose >3) rprintf(FINFO, "requesting SeSecurityPrivilege\n");
++	if (!set_privilege_security(1)) {
++		rprintf(FERROR, "could not obtain SeSecurityPrivilege: %s\n",
++			ntstreams_get_last_error_message());
++	}
++	privileged_for_restore = 1;
++//	rprintf(FINFO, "attach debugger (sleep 10)...\n");
++//	sleep( 10);	// allow gdb debugger to attach
++//	rprintf(FINFO, "OK.\n");
++
++}
++
++enum hopen_mode { hopen_read, hopen_write };
++
++static HANDLE hopen(const char *path, enum hopen_mode mode)
++{
++	DWORD desiredAccess, shareMode, creationDisposition, flagsAndAttributes;
++	LPSECURITY_ATTRIBUTES securityAttributes = NULL;
++	HANDLE h, templateFile = NULL;
++	wchar_t *win_path = (wchar_t *)cygwin_create_path(CCP_POSIX_TO_WIN_W, (void *)path);
++	if (verbose > 3)
++		rprintf(FINFO, "cygwin_create_path(%s) = %ls\n", path, win_path);
++	switch (mode) {
++		case hopen_read:
++			desiredAccess = GENERIC_READ | ACCESS_SYSTEM_SECURITY;
++			shareMode = FILE_SHARE_READ;
++			creationDisposition = OPEN_EXISTING;
++			flagsAndAttributes = FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT;
++			break;
++		case hopen_write:
++		default:
++			/* desiredAccess = GENERIC_ALL | ACCESS_SYSTEM_SECURITY;
++			 * GENERIC_ALL causes CreateFileW to give an "access denied" error.
++			 * I don't know why, since this works in CortexIT.Replicator.BackupStreams.
++			 */
++			desiredAccess = WRITE_OWNER | WRITE_DAC | ACCESS_SYSTEM_SECURITY;
++			shareMode = FILE_SHARE_WRITE;
++			creationDisposition = OPEN_EXISTING;
++			flagsAndAttributes = FILE_FLAG_BACKUP_SEMANTICS;
++			break;
++	}
++	h = CreateFileW(win_path, desiredAccess, shareMode, 
++			securityAttributes, creationDisposition, flagsAndAttributes, templateFile);
++	free(win_path);
++	return h;
++}
++
++// Size of the stream header without the stream name (which we treat seperately).
++// #define SIZEOF_WIN32_STREAM_ID (sizeof(WIN32_STREAM_ID) - sizeof(WCHAR[ANYSIZE_ARRAY]))
++#define SIZEOF_WIN32_STREAM_ID 20
++
++/* Return values:
++ * 1: success
++ * 0: Posix error (error code in errno)
++ * -1: win32 error (use GetLastError to get error code)*/
++int get_ntfs_acls ( struct acls_struct *file)
++{
++	int success = 1;
++	LPVOID context = NULL;
++	char buffer[BUFFER_SIZE];
++	static char acls_bin[BUFFER_SIZE];
++	char *bufptr = acls_bin;
++	int  bufsize = 0;
++	WIN32_STREAM_ID header;
++	DWORD bytesRead;
++	char *path = file->dirname;
++
++	set_backup_privilege();
++	HANDLE h = hopen(path, hopen_read);
++	if (h == INVALID_HANDLE_VALUE) {
++		DWORD lastError = GetLastError();
++		ntstreams_last_error_what = "CreateFile";
++		FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
++			NULL, lastError, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
++		       	ntstreams_last_error, ERROR_BUFFER_SIZE, NULL);
++		rprintf(FERROR, "could not create handle: %s\n",
++			ntstreams_get_last_error_message());
++		return -1;
++	}
++
++	while (1) {
++		LARGE_INTEGER bytesRemaining;
++		if (!BackupRead(h, (LPBYTE)(&header), 
++			SIZEOF_WIN32_STREAM_ID, &bytesRead, 0, 1, &context)) {
++			success = -1;
++			ntstreams_last_error_what = "BackupRead";
++			break;
++		}
++		if (bytesRead == 0 || header.dwStreamId == 0)
++			break; /* end of file */
++
++		if (verbose > 3) {
++			rprintf(FINFO, 
++	"BackupRead found header type %lx, size %lld, streamNameSize %ld, bytesRead %ld\n", 
++	header.dwStreamId, header.Size.QuadPart, header.dwStreamNameSize, bytesRead);
++		}
++
++		bytesRemaining.QuadPart = SIZEOF_WIN32_STREAM_ID + header.Size.QuadPart 
++			+ header.dwStreamNameSize - bytesRead;
++		if (header.dwStreamId == BACKUP_SECURITY_DATA) {
++
++			memcpy( bufptr, &header, SIZEOF_WIN32_STREAM_ID);
++			bufptr += SIZEOF_WIN32_STREAM_ID;
++			bufsize = SIZEOF_WIN32_STREAM_ID;
++
++			while(bytesRemaining.QuadPart > 0) {
++				DWORD count = bytesRemaining.QuadPart > BUFFER_SIZE ? 
++					BUFFER_SIZE : bytesRemaining.LowPart;
++				if (!BackupRead(h, (LPBYTE)buffer, count, &bytesRead, 0, 1, &context)) {
++					success = -1;
++					ntstreams_last_error_what = "BackupRead";
++					goto finish;
++				}
++				if (verbose > 3) {
++	rprintf(FINFO, "BackupRead count %ld, bytesRead %ld\n", count, bytesRead);
++				}
++				if (bytesRead == 0) {
++					break;
++				}
++
++				memcpy( bufptr, &buffer, bytesRead);
++				bufptr += bytesRead;
++				bufsize += bytesRead;
++
++				bytesRemaining.QuadPart -= bytesRead;
++			}
++			goto finish; // got nt acls, no further scans needed
++
++		} else {
++			// skip over other streams
++			DWORD lowBytesSeeked, highBytesSeeked;
++
++			/* Seek over the rest of the stream */
++			if (!BackupSeek(h, bytesRemaining.LowPart, bytesRemaining.HighPart, 
++				&lowBytesSeeked, &highBytesSeeked, &context)) {
++				success = -1;
++				ntstreams_last_error_what = "BackupSeek";
++				break;
++			}
++		}
++	}
++finish:
++	if (success == 0) {
++		/* Posix error */
++		strncpy(ntstreams_last_error, strerror(errno), ERROR_BUFFER_SIZE);
++	} else if (success == -1) {
++		/* win32 error */
++		DWORD lastError = GetLastError();
++		FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
++			NULL, lastError, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
++		       	ntstreams_last_error, ERROR_BUFFER_SIZE, NULL);
++		rprintf(FERROR, "get acls on %s: %s\n",
++			path, ntstreams_get_last_error_message());
++	}
++	BackupRead(h, NULL, 0, &bytesRead, 1, 1, &context);
++	CloseHandle(h);
++
++	file->nt_acls = acls_bin;
++	file->nt_acls_len = bufsize;
++
++	return success;
++}
++
++int set_ntfs_acls ( struct acls_struct *file)
++{
++	int success = 1;
++	LPVOID context = NULL;
++	DWORD bytesWritten;
++	char *path = file->dirname;
++
++	set_restore_privilege();
++	HANDLE h = hopen(path, hopen_write);
++	if (h == INVALID_HANDLE_VALUE) {
++		DWORD lastError = GetLastError();
++		ntstreams_last_error_what = "CreateFile";
++		FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
++			NULL, lastError, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
++		       	ntstreams_last_error, ERROR_BUFFER_SIZE, NULL);
++		rprintf(FINFO, "set acls on %s: %s\n",
++			path, ntstreams_get_last_error_message());
++		return -1;
++	}
++
++	int blen = file->nt_acls_len;
++	if (verbose > 2) {
++		rprintf(FINFO, "set_nt_acls size %d for %s\n", blen, path);
++	}
++
++	if (!BackupWrite(h, (LPBYTE)file->nt_acls, blen, &bytesWritten, 0, 1, &context)) {
++		success = -1;
++		ntstreams_last_error_what = "BackupWrite (buffer)";
++		rprintf(FINFO, "wrote nt acls size %d for %s with ERROR %d.\n", 
++				bytesWritten, path, GetLastError());
++		goto finish;
++	} 
++	if (verbose  ) {
++		rprintf(FINFO, "wrote nt acls size %d for %s\n", bytesWritten, path);
++	}
++
++finish:
++	if (success == 0) {
++		/* Posix error */
++		strncpy(ntstreams_last_error, strerror(errno), ERROR_BUFFER_SIZE);
++	} else if (success == -1) {
++		/* win32 error */
++		DWORD lastError = GetLastError();
++		FormatMessage(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
++			NULL, lastError, MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
++			ntstreams_last_error, ERROR_BUFFER_SIZE, NULL);
++		rprintf(FINFO, "set acls on %s: %s\n",
++			path, ntstreams_get_last_error_message());
++		rprintf(FERROR, "set acls on %s: %s\n",
++			path, ntstreams_get_last_error_message());
++	}
++	BackupWrite(h, NULL, 0, &bytesWritten, 1, 1, &context);
++	CloseHandle(h);
++	return success;
++}
++
++ssize_t my_llistxattr(const char *path, char *list, size_t size)
++{
++	int len;
++
++#define XATTR_SECURITY_NTACL "security.ntacl"
++	len = snprintf( list, size, XATTR_SECURITY_NTACL );
++	if (verbose > 3) {
++		rprintf(FINFO, "xattr list [%s] len %d+1\n", list, len);
++	}
++	return( len+1);
++}
++
++ssize_t my_lgetxattr(const char *path, const char *name, void *value, size_t size)
++{
++	struct acls_struct file;
++	int success, len=0;
++
++	file.dirname = path;
++
++	success = get_ntfs_acls( &file);
++	if( !success) {
++		rprintf(FERROR, "could not obtain acls: %s\n",
++			ntstreams_get_last_error_message());
++	} else {
++		len = file.nt_acls_len;
++		if( size) {
++		       if( size >= len) {
++				memcpy( value, file.nt_acls, len);
++				if (verbose ) {
++	rprintf(FINFO, "lxgetxattr %s [%s] len %d\n", 
++			path, name, len);
++				}
++			} else {
++	rprintf(FERROR, "buffer too small, got size %d, need len %d.\n", size, len);
++			}
++		}
++	}
++	return( len);
++}
++
++ssize_t my_lsetxattr(const char *path, const char *name, void *value, size_t size)
++{
++	struct acls_struct file;
++	int success;
++
++	if (verbose > 2) {
++		rprintf(FINFO, "lsetxattr %s [%s] len %d\n", 
++			path, name, size);
++	}
++
++	if( strcmp( name, XATTR_SECURITY_NTACL)) {
++		rprintf(FERROR, "unexpected xattr %s.\n", name);
++		return( -1);
++	}
++
++	file.dirname = path;
++	file.nt_acls = value;
++	file.nt_acls_len = size;
++
++	success = set_ntfs_acls( &file);
++	if( !success) {
++		rprintf(FERROR, "could not set acls for %s: %s\n",
++			path, ntstreams_get_last_error_message());
++		return( -1);
++	}
++	return( 0);
++}
+--- rsync-3.2.6/rsync.h	2022-08-18 17:33:25.000000000 -0700
++++ rsync-3.2.6-pl/rsync.h	2022-12-04 16:44:26.097328400 -0800
+@@ -816,6 +816,15 @@
+ #endif
+ };
+ 
++#define NEEDS_ACLS_STRUCT
++#ifdef NEEDS_ACLS_STRUCT
++struct acls_struct {
++        const char *dirname;    /* The dir info inside the transfer */
++        const char *nt_acls;    // ntfs acls
++        int nt_acls_len;        // ntfs acls length
++};
++#endif
++
+ extern int file_extra_cnt;
+ extern int inc_recurse;
+ extern int atimes_ndx;
+@@ -1396,7 +1405,8 @@
+ #define exit_cleanup(code) _exit_cleanup(code, __FILE__, __LINE__)
+ 
+ #ifdef HAVE_GETEUID
+-#define MY_UID() geteuid()
++	// assume 'root' powers on Windows
++#define MY_UID() 0
+ #else
+ #define MY_UID() getuid()
+ #endif
+--- rsync-3.2.6/usage.c	2022-08-23 14:56:23.000000000 -0700
++++ rsync-3.2.6-pl/usage.c	2022-12-04 16:07:31.042186800 -0800
+@@ -187,8 +187,8 @@
+ #if SUBPROTOCOL_VERSION != 0
+ 	subprotocol = istring(".PR%d", SUBPROTOCOL_VERSION);
+ #endif
+-	rprintf(f, "%s  version %s  protocol version %d%s\n",
+-		RSYNC_NAME, rsync_version(), PROTOCOL_VERSION, subprotocol);
++	rprintf(f, "%s  version %s (compiled %s %s) protocol version %d%s\n",
++		RSYNC_NAME, rsync_version(), __DATE__, __TIME__, PROTOCOL_VERSION, subprotocol);
+ 
+ 	rprintf(f, "Copyright (C) 1996-" LATEST_YEAR " by Andrew Tridgell, Wayne Davison, and others.\n");
+ 	rprintf(f, "Web site: https://rsync.samba.org/\n");
+--- rsync-3.2.6/rsync.c	2022-08-13 10:53:53.000000000 -0700
++++ rsync-3.2.6-pl/rsync.c	2022-12-04 16:37:29.171196900 -0800
+@@ -528,6 +528,10 @@
+ 		;
+ 	} else
+ #endif
++
++	// chown and friends fail on windows 
++	// if the target uid/gid does not exist on the receiving system
++#if defined DO_CHANGE_UID
+ 	if (change_uid || change_gid) {
+ 		if (DEBUG_GTE(OWN, 1)) {
+ 			if (change_uid) {
+@@ -569,6 +573,7 @@
+ 		if (change_gid)
+ 			updated |= UPDATED_GROUP;
+ 	}
++#endif
+ 
+ #ifdef SUPPORT_XATTRS
+ 	if (am_root < 0)
+@@ -652,6 +657,10 @@
+ 	}
+ #endif
+ 
++	// chmod on windows alters the security attributes on the receiver
++	// cygwin permission bits may look odd 
++	// but windows permissions are restored as per sender
++#undef HAVE_CHMOD // let's try without it..
+ #ifdef HAVE_CHMOD
+ 	if (!BITS_EQUAL(sxp->st.st_mode, new_mode, CHMOD_BITS)) {
+ 		int ret = am_root < 0 ? 0 : do_chmod(fname, new_mode);
+--- rsync-3.2.6/version.h	2022-09-09 12:23:37.000000000 -0700
++++ rsync-3.2.6-pl/version.h	2022-11-22 12:05:39.478065800 -0800
+@@ -1,2 +1,2 @@
+-#define RSYNC_VERSION "3.2.6"
++#define RSYNC_VERSION "3.2.6pl"
+ #define MAINTAINER_TZ_OFFSET -7.0
+--- rsync-3.2.6/options.c	2022-08-23 14:56:23.000000000 -0700
++++ rsync-3.2.6-pl/options.c	2022-12-04 16:38:40.977583900 -0800
+@@ -313,7 +313,7 @@
+ 	{ NULL, "--debug", 0, 0, 0, 0 }
+ };
+ 
+-static int verbose = 0;
++int verbose = 0;	// ntacls.c wants to check verbose level for logging
+ static int do_stats = 0;
+ static int do_progress = 0;
+ static int daemon_opt;   /* sets am_daemon after option error-reporting */
+--- rsync-3.2.6/lib/sysxattrs.c	2022-01-15 17:21:01.000000000 -0800
++++ rsync-3.2.6-pl/lib/sysxattrs.c	2022-12-04 16:11:53.229198200 -0800
+@@ -32,7 +32,7 @@
+ 
+ ssize_t sys_lgetxattr(const char *path, const char *name, void *value, size_t size)
+ {
+-	return lgetxattr(path, name, value, size);
++	return my_lgetxattr(path, name, value, size);
+ }
+ 
+ ssize_t sys_fgetxattr(int filedes, const char *name, void *value, size_t size)
+@@ -42,7 +42,7 @@
+ 
+ int sys_lsetxattr(const char *path, const char *name, const void *value, size_t size)
+ {
+-	return lsetxattr(path, name, value, size, 0);
++	return my_lsetxattr(path, name, value, size);
+ }
+ 
+ int sys_lremovexattr(const char *path, const char *name)
+@@ -52,7 +52,7 @@
+ 
+ ssize_t sys_llistxattr(const char *path, char *list, size_t size)
+ {
+-	return llistxattr(path, list, size);
++	return my_llistxattr(path, list, size);
+ }
+ 
+ #elif HAVE_OSX_XATTRS
