@@ -74,17 +74,17 @@ published as patches to a 2009 version of Rsync a while back under the GPL.
 
 ### Build instructions
 
-- Download the rsync 3.2.6 release from here:
-https://download.samba.org/pub/rsync/src/rsync-3.2.6.tar.gz
+- Download the rsync 3.2.6 release from here:\
+https://download.samba.org/pub/rsync/src/rsync-3.2.6.tar.gz \
 .. and unpack into a local folder named rsync-3.2.6.
 
 - Download the posted patch to a local location, say, /tmp.
-.. and try the patch with
-`patch --dry-run -p0 < /tmp/rsync-3.2.6-ntacls.patch`
-if things look OK, apply with
+.. and try the patch with \
+`patch --dry-run -p0 < /tmp/rsync-3.2.6-ntacls.patch` \
+if things look OK, apply with \
 `patch -p0 < /tmp/rsync-3.2.6-ntacls.patch`
 
-- Configure and build the patched rsync version:
+- Configure and build the patched rsync version: \
 `./configure
 make
 ./rsync -V`
@@ -93,8 +93,11 @@ make
 
 - You may want to rename existing versions to preserve them as fall-back
 
-- Copy the just built rsync version to your sender and receiver Windows systems
-as /usr/local/bin/rsync with a symlink to /usr/bin/rsync for remote ssh on Windows.
+- Copy the just built rsync version to your sender and receiver Windows systems as\
+`/usr/local/bin/rsync` \
+with a symlink to \
+`/usr/bin/rsync`\
+for remote ssh on Windows.
 
 
 
