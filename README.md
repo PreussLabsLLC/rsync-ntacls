@@ -8,6 +8,14 @@ This requires the cygwin posix-for-windows environment.
 Rsync has been available on Windows platforms for ages, but blissfully ignores Windows NT's
 security attributes.
 
+Microsoft has provided its RoboCopy tool to transfer files locally or remotely 
+while preserving NTFS security attributes (given the right options). But it 
+relies on the SMB protocol for remote access (chatty and sometimes hampered by propagation
+delays on remote links) and does not support delta transfers (whole files are copied).
+
+This patch enables rsync on windows to transfer NTFS security attributes while offering
+rsync's delta transfers.
+
 ## Background:
 
 ### Intro to Windows permissions & security:
@@ -15,6 +23,7 @@ security attributes.
 
 ### From the horse's mouth:
 - https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers
+- https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/robocopy
 
 Windows NT's ACLS are accessed by reading a magic BACKUP_SECURITY_DATA stream
 (one of possibly many streams, but every file & folder on ntfs has exactly one of these)
@@ -22,10 +31,10 @@ utilizing the privileged (needs more magic process setup) BackupRead function.
 
 - https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-backupread
 - https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-win32_stream_id
-
 - https://www.samba.org/samba/docs/current/man-html/vfs_acl_xattr.8.html
-
 - https://www.backupassist.com/support/en/backupassist/manage/rsync-options.htm
+- https://www.backupassist.com/rsync/rsync_3.0.7-ba_6.1.1.patch
+- https://noah.org/ssh/cygwin-sshd.html
 
 ## Implementation:
 
@@ -39,7 +48,7 @@ remote copies from NT to NT via ssh work also ~~(after excluding rsync's (POSIX)
 which altered the NT ACLS)~~. NT to MAC has also been tested with `xattr filename` displaying
 the NTACLS as hexdump. Testing restore from MAC pending..
 
-This is based on the ntstreams.c implementation of BackupAssist's rsync,
+The WIN32 magic is based on the ntstreams.c implementation of BackupAssist's rsync,
 published as patches to a 2009 version of Rsync a while back under the GPL.
 
 ## Details:
@@ -47,7 +56,7 @@ published as patches to a 2009 version of Rsync a while back under the GPL.
 ### Running examples
 
 - local copy:\
-`./rsync -Xav --inplace /cygdrive/c/Users/Paul/Contacts /tmp/copy`
+`./rsync -Xav /cygdrive/c/Users/Paul/Contacts /tmp/copy`
 
 - remote copy to Windows:\
 `./rsync -Xave ssh /cygdrive/c/Users/Paul/Contacts Administrator@bigbob:/tmp/copy`
@@ -59,13 +68,23 @@ published as patches to a 2009 version of Rsync a while back under the GPL.
 
 - local and remote Windows systems need this version of rsync
 - the `X` (xattr) option is required to carry NT ACLS
+- other possibly existing named NTFS streams are skipped
+- the rsync processes need to be started from an elevated (Administrators) session\
+in order to utilize the WIN32 BackupRead/Write functions
+- for rsync-over-ssh the cygwin sshd needs to be configured, ideally with key-based authentication
 - on Mac/*nix, an rsync version with xattr support will be needed
 - on Mac/*nix, xattr `rsync.security.ntacl` will hold the NT ACLS
 - debugging info is currently a bit verbose
 
 ### Implementation details
 
-.. to follow
+- added one module, ntacsl.c, to rsync's Makefile.in
+- modified three ~~amigos~~ functions to list, get, and set xattrs in lib/sysxattrs.c\
+instead of acting on xattrs, they read and write NTFS ACLS contained in the BACKUP_SECURITY_DATA stream.\
+Rsync is managing/comparing/transferring the ACLS as xattrs automatically.
+- chown on restore altered NTFS security attributes, thus disabled in rsync.c
+- Rysnc on windows needs to think it's running as 'root', thus a hardcoded UID 0 in rsync.h
+- minor adjustments in options.c, version.h, and usage.c
 
 ### Build instructions
 
@@ -115,6 +134,3 @@ General Public Licence for details.
 with a symlink to \
 `/usr/bin/rsync`\
 for remote ssh on Windows.
-
-
-
