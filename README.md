@@ -44,12 +44,6 @@ published as patches to a 2009 version of Rsync a while back under the GPL.
 
 ## Details:
 
-### Building this version
-
-- Setup a suitable cygwin environment with C development tools (I used cygwin64)
-- you may need to install certain libraries (zlib, xxhash)
-- just run execute `make` in the rsync-3.2.6 folder (no ./configure)
-
 ### Running examples
 
 - local copy:\
@@ -75,6 +69,9 @@ published as patches to a 2009 version of Rsync a while back under the GPL.
 
 ### Build instructions
 
+- Setup a suitable cygwin environment with C development tools (I used cygwin64)
+- You may need to install certain libraries (zlib, xxhash)\
+Kindly see https://github.com/WayneD/rsync/blob/master/INSTALL.md for details.
 - Download the rsync 3.2.6 release from here:\
 https://download.samba.org/pub/rsync/src/rsync-3.2.6.tar.gz \
 .. and unpack into a local folder named rsync-3.2.6.
