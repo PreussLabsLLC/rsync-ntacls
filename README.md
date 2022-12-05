@@ -55,7 +55,7 @@ published as patches to a 2009 version of Rsync a while back under the GPL.
 `./rsync -Xav --inplace /cygdrive/c/Users/Paul/Contacts /tmp/copy`
 
 - remote copy to Windows:\
-`./rsync -Xave ssh /cygdrive/c/Users/Paul/Contacts Administrator@192.168.37.226:/tmp/copy`
+`./rsync -Xave ssh /cygdrive/c/Users/Paul/Contacts Administrator@bigbob:/tmp/copy`
 
 - remote copy to Mac:\
 `./rsync -Xave ssh /cygdrive/c/Users/Paul/Contacts root@minimac:/tmp/copy`
@@ -66,10 +66,35 @@ published as patches to a 2009 version of Rsync a while back under the GPL.
 - the `X` (xattr) option is required to carry NT ACLS
 - on Mac/*nix, an rsync version with xattr support will be needed
 - on Mac/*nix, xattr `rsync.security.ntacl` will hold the NT ACLS
+- debugging info is currently a bit verbose
 
 ### Implementation details
 
 .. to follow
+
+### Build instructions
+
+- Download the rsync 3.2.6 release from here:
+https://download.samba.org/pub/rsync/src/rsync-3.2.6.tar.gz
+.. and unpack into a local folder named rsync-3.2.6.
+
+- Download the posted patch to a local location, say, /tmp.
+.. and try the patch with
+`patch --dry-run -p0 < /tmp/rsync-3.2.6-ntacls.patch`
+if things look OK, apply with
+`patch -p0 < /tmp/rsync-3.2.6-ntacls.patch`
+
+- Configure and build the patched rsync version:
+`./configure
+make
+./rsync -V`
+
+(Sorry for the warnings, try to ignore them for now.)
+
+- You may want to rename existing versions to preserve them as fall-back
+
+- Copy the just built rsync version to your sender and receiver Windows systems
+as /usr/local/bin/rsync with a symlink to /usr/bin/rsync for remote ssh on Windows.
 
 
 
