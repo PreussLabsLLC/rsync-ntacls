@@ -85,9 +85,9 @@ if things look OK, apply with \
 - Configure and build the patched rsync version: \
 `./configure`\
 `make`\
-`./rsync -V`
-(Sorry for the compiler warnings, try to ignore them for now.)
-You should be greeted by something like this: 
+`./rsync -V`\
+(Sorry for the compiler warnings, try to ignore them for now.)\
+You should be greeted by something like this:
 ```
 $ ./rsync -V
 rsync  version 3.2.6pl (compiled Dec  4 2022 17:00:02) protocol version 31
