@@ -83,9 +83,9 @@ if things look OK, apply with \
 `patch -p0 < /tmp/rsync-3.2.6-ntacls.patch`
 
 - Configure and build the patched rsync version: \
-`./configure
-make
-./rsync -V`
+`./configure`\
+`make`\
+`./rsync -V`
 
 (Sorry for the warnings, try to ignore them for now.)
 
