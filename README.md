@@ -3,8 +3,6 @@
 This is work-in-progress on teaching rsync to copy Windows NT ACLS as security.NTACLS
 extended attribute. I'm hoping for Samba vfs_acl_xattr compatibilty at some point.
 
-This requires the cygwin posix-for-windows environment.
-
 Rsync has been available on Windows platforms for ages, but blissfully ignores Windows NT's
 security attributes.
 
@@ -14,7 +12,7 @@ relies on the SMB protocol for remote access (chatty and sometimes hampered by p
 delays on remote links) and does not support delta transfers (whole files are copied).
 
 This patch enables rsync on windows to transfer NTFS security attributes while offering
-rsync's delta transfers.
+rsync's delta transfers. This requires the cygwin posix-for-windows environment.
 
 ## Background:
 
@@ -46,7 +44,7 @@ Since Samba thought about storing the NT ACLS as a security.NTACLS xattr, I trie
 luck with that approach. At this point (Dec 2022) local copies from NT to NT work, 
 remote copies from NT to NT via ssh work also ~~(after excluding rsync's (POSIX) 'chmod',
 which altered the NT ACLS)~~. NT to MAC has also been tested with `xattr filename` displaying
-the NTACLS as hexdump. Testing restore from MAC pending..
+the NTACLS as hexdump.
 
 The WIN32 magic is based on the ntstreams.c implementation of BackupAssist's rsync,
 published as patches to a 2009 version of Rsync a while back under the GPL.
@@ -96,7 +94,7 @@ https://download.samba.org/pub/rsync/src/rsync-3.2.6.tar.gz \
 .. and unpack into a local folder named rsync-3.2.6.
 
 - Download the posted patch to a local location, say, /tmp.
-.. and try the patch with \
+.. and try the patch from the folder above rsync-3.2.6 with \
 `patch --dry-run -p0 < /tmp/rsync-3.2.6-ntacls.patch` \
 if things look OK, apply with \
 `patch -p0 < /tmp/rsync-3.2.6-ntacls.patch`
@@ -105,11 +103,9 @@ if things look OK, apply with \
 `./configure`\
 `make`\
 `./rsync -V`\
-(Sorry for the compiler warnings, try to ignore them for now.)\
 You should be greeted by something like this:
 ```
-$ ./rsync -V
-rsync  version 3.2.6pl (compiled Dec  4 2022 17:00:02) protocol version 31
+rsync  version 3.2.6pl protocol version 31
 Copyright (C) 1996-2022 by Andrew Tridgell, Wayne Davison, and others.
 Web site: https://rsync.samba.org/
 Capabilities:
@@ -124,9 +120,12 @@ Checksum list:
 Compress list:
     zstd lz4 zlibx zlib none
 
+@(#) ntacls.c pl 1.0 Dec  8 2022 10:40:34 https://github.com/PreussLabsLLC/rsync-ntacls
+
 rsync comes with ABSOLUTELY NO WARRANTY.  This is free software, and you
 are welcome to redistribute it under certain conditions.  See the GNU
 General Public Licence for details.
+
 ```
 - You may want to rename existing versions to preserve them as fall-back
 - Copy the just built rsync version to your sender and receiver Windows systems as\
