@@ -1,7 +1,7 @@
 # rsync-ntacls
 
 This is work-in-progress on teaching rsync to copy Windows NT ACLS as security.NTACLS
-extended attribute. I'm hoping for Samba vfs_acl_xattr compatibilty at some point.
+extended attribute.\ I'm hoping for Samba vfs_acl_xattr compatibilty at some point.
 
 Rsync has been available on Windows platforms for ages, but blissfully ignores Windows NT's
 security attributes.
@@ -16,10 +16,11 @@ rsync's delta transfers. This requires the cygwin posix-for-windows environment.
 
 ## Background:
 
-### Intro to Windows permissions & security:
+### Everything You Always Wanted to Know About SIDs * But Were Afraid to Ask:
 - https://cygwin.com/cygwin-ug-net/ntsec.html#ntsec-common
+- ~~https://en.wikipedia.org/wiki/Everything_You_Always_Wanted_to_Know_About_Sex*_(*But_Were_Afraid_to_Ask)_(film)~~
 
-### From the horse's mouth:
+### From the Horse's Mouth:
 - https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers
 - https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/robocopy
 
@@ -43,7 +44,7 @@ on ordering ACLS (amongst other things).
 Since Samba thought about storing the NT ACLS as a security.NTACLS xattr, I tried my
 luck with that approach. At this point (Dec 2022) local copies from NT to NT work, 
 remote copies from NT to NT via ssh work also ~~(after excluding rsync's (POSIX) 'chmod',
-which altered the NT ACLS)~~. NT to MAC has also been tested with `xattr filename` displaying
+which altered the NT ACLS)~~. NT to MAC has also been tested with `xattr -l filename` displaying
 the NTACLS as hexdump.
 
 The WIN32 magic is based on the ntstreams.c implementation of BackupAssist's rsync,
@@ -74,7 +75,7 @@ in order to utilize the WIN32 BackupRead/Write functions
 - on Mac/*nix, xattr `rsync.security.ntacl` will hold the NT ACLS
 - debugging info is currently a bit verbose
 
-### Implementation details
+### Implementation Details
 
 - added one module, ntacsl.c, to rsync's Makefile.in
 - modified three ~~amigos~~ functions to list, get, and set xattrs in lib/sysxattrs.c\
@@ -84,7 +85,7 @@ Rsync is managing/comparing/transferring the ACLS as xattrs automatically.
 - Rysnc on windows needs to think it's running as 'root', thus a hardcoded UID 0 in rsync.h
 - minor adjustments in options.c, version.h, and usage.c
 
-### Build instructions
+### Build Instructions
 
 - Setup a suitable cygwin environment with C development tools (I used cygwin64)
 - You may need to install certain libraries (zlib, xxhash)\
