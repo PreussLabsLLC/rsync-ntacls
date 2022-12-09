@@ -1,7 +1,8 @@
 # rsync-ntacls
 
 This is work-in-progress on teaching rsync to copy Windows NT ACLS as security.NTACLS
-extended attribute.\ I'm hoping for Samba vfs_acl_xattr compatibilty at some point.
+extended attribute.\
+I'm hoping for Samba vfs_acl_xattr compatibilty at some point.
 
 Rsync has been available on Windows platforms for ages, but blissfully ignores Windows NT's
 security attributes.
@@ -12,7 +13,8 @@ relies on the SMB protocol for remote access (chatty and sometimes hampered by p
 delays on remote links) and does not support delta transfers (whole files are copied).
 
 This patch enables rsync on windows to transfer NTFS security attributes while offering
-rsync's delta transfers. This requires the cygwin posix-for-windows environment.
+rsync's delta transfers.\
+This requires the cygwin posix-for-windows environment.
 
 ## Background:
 
@@ -52,16 +54,16 @@ published as patches to a 2009 version of Rsync a while back under the GPL.
 
 ## Details:
 
-### Running examples
+### Running Examples:
 
 - local copy:\
-`./rsync -Xav /cygdrive/c/Users/Paul/Contacts /tmp/copy`
+`rsync -Xav /cygdrive/c/Users/Paul/Contacts /tmp/copy`
 
 - remote copy to Windows:\
-`./rsync -Xave ssh /cygdrive/c/Users/Paul/Contacts Administrator@bigbob:/tmp/copy`
+`rsync -Xave ssh /cygdrive/c/Users/Paul/Contacts Administrator@bigbob:/tmp/copy`
 
 - remote copy to Mac:\
-`./rsync -Xave ssh /cygdrive/c/Users/Paul/Contacts root@minimac:/tmp/copy`
+`rsync -Xave ssh /cygdrive/c/Users/Paul/Contacts root@minimac:/tmp/copy`
 
 ### Notes:
 
@@ -73,9 +75,10 @@ in order to utilize the WIN32 BackupRead/Write functions
 - for rsync-over-ssh the cygwin sshd needs to be configured, ideally with key-based authentication
 - on Mac/*nix, an rsync version with xattr support will be needed
 - on Mac/*nix, xattr `rsync.security.ntacl` will hold the NT ACLS
+- restore from Mac/*nix will restore the NT ACLS (as NT ACLS, not xattr)
 - debugging info is currently a bit verbose
 
-### Implementation Details
+### Implementation Details:
 
 - added one module, ntacsl.c, to rsync's Makefile.in
 - modified three ~~amigos~~ functions to list, get, and set xattrs in lib/sysxattrs.c\
@@ -85,7 +88,7 @@ Rsync is managing/comparing/transferring the ACLS as xattrs automatically.
 - Rysnc on windows needs to think it's running as 'root', thus a hardcoded UID 0 in rsync.h
 - minor adjustments in options.c, version.h, and usage.c
 
-### Build Instructions
+### Build Instructions:
 
 - Setup a suitable cygwin environment with C development tools (I used cygwin64)
 - You may need to install certain libraries (zlib, xxhash)\
