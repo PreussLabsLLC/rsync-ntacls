@@ -18,9 +18,8 @@ This requires the cygwin posix-for-windows environment.
 
 ## Background:
 
-### Everything You Always Wanted to Know About SIDs * But Were Afraid to Ask:
+### Everything You Always Wanted to Know About SIDs * But Were Afraid to Ask: [^1]
 - https://cygwin.com/cygwin-ug-net/ntsec.html#ntsec-common
-- ~~https://en.wikipedia.org/wiki/Everything_You_Always_Wanted_to_Know_About_Sex*_(*But_Were_Afraid_to_Ask)_(film)~~
 
 ### From the Horse's Mouth:
 - https://learn.microsoft.com/en-us/windows-server/identity/ad-ds/manage/understand-security-identifiers
@@ -137,3 +136,5 @@ General Public Licence for details.
 with a symlink to \
 `/usr/bin/rsync`\
 for remote ssh on Windows.
+
+[^1]: https://en.wikipedia.org/wiki/Everything_You_Always_Wanted_to_Know_About_Sex*_(*But_Were_Afraid_to_Ask)_(film)
